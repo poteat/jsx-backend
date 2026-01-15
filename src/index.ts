@@ -92,12 +92,21 @@ export {
 export {
   useRequest,
   useParams,
+  useParamsFromPath,
   useQuery,
   useBody,
   useHeaders,
   useHeader,
   setRequestContext,
 } from "./response.js";
+
+// Path type utilities
+export type {
+  ExtractRouteParams,
+  TypedRouteContext,
+  TypedRenderFn,
+  ParamsFromPath,
+} from "./path-types.js";
 
 // Types
 export type {

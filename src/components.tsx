@@ -4,6 +4,7 @@ import type {
   RouterProps,
   RouteProps,
   MethodProps,
+  TypedMethodProps,
   MiddlewareProps,
   StaticProps,
   ErrorBoundaryProps,
@@ -12,7 +13,9 @@ import type {
   Response,
   NextFunction,
   ServerNodeType,
+  ExtractRouteParams,
 } from "./types.js";
+import type { TypedRouteContext } from "./path-types.js";
 
 /**
  * Symbol to mark our custom elements for the reconciler
@@ -146,15 +149,42 @@ ErrorBoundary.__serverNodeType = "error-boundary" as const;
 // ============================================================================
 
 /**
+ * Extended props for HTTP methods with typed render support.
+ */
+interface ExtendedMethodProps<Path extends string = string> {
+  path?: Path;
+  handler?: RouteHandler;
+  children?: React.ReactNode;
+  /** Typed render prop - receives context with params inferred from path */
+  render?: (context: TypedRouteContext<ExtractRouteParams<Path>>) => React.ReactNode;
+}
+
+/**
  * Handle GET requests.
  *
  * @example
  * ```tsx
+ * // Handler style
  * <Get path="/users" handler={(req, res) => res.json(users)} />
+ *
+ * // Component children style
+ * <Get path="/users/:id">
+ *   <UserResponse />
+ * </Get>
+ *
+ * // Typed render prop style (best type safety)
+ * <Get path="/users/:id" render={({ params }) => (
+ *   <UserResponse id={params.id} />  // params.id is typed!
+ * )} />
  * ```
  */
-export function Get({ path, handler }: MethodProps): React.ReactElement {
-  return createElement("get", { path, handler });
+export function Get<Path extends string = string>({
+  path,
+  handler,
+  children,
+  render,
+}: ExtendedMethodProps<Path>): React.ReactElement {
+  return createElement("get", { path, handler, render }, children);
 }
 Get.__serverNodeType = "get" as const;
 
@@ -167,58 +197,98 @@ Get.__serverNodeType = "get" as const;
  *   const user = createUser(req.body);
  *   res.status(201).json(user);
  * }} />
+ *
+ * // Or with typed render prop
+ * <Post path="/users" render={({ body }) => (
+ *   <CreateUserResponse data={body} />
+ * )} />
  * ```
  */
-export function Post({ path, handler }: MethodProps): React.ReactElement {
-  return createElement("post", { path, handler });
+export function Post<Path extends string = string>({
+  path,
+  handler,
+  children,
+  render,
+}: ExtendedMethodProps<Path>): React.ReactElement {
+  return createElement("post", { path, handler, render }, children);
 }
 Post.__serverNodeType = "post" as const;
 
 /**
  * Handle PUT requests.
  */
-export function Put({ path, handler }: MethodProps): React.ReactElement {
-  return createElement("put", { path, handler });
+export function Put<Path extends string = string>({
+  path,
+  handler,
+  children,
+  render,
+}: ExtendedMethodProps<Path>): React.ReactElement {
+  return createElement("put", { path, handler, render }, children);
 }
 Put.__serverNodeType = "put" as const;
 
 /**
  * Handle PATCH requests.
  */
-export function Patch({ path, handler }: MethodProps): React.ReactElement {
-  return createElement("patch", { path, handler });
+export function Patch<Path extends string = string>({
+  path,
+  handler,
+  children,
+  render,
+}: ExtendedMethodProps<Path>): React.ReactElement {
+  return createElement("patch", { path, handler, render }, children);
 }
 Patch.__serverNodeType = "patch" as const;
 
 /**
  * Handle DELETE requests.
  */
-export function Delete({ path, handler }: MethodProps): React.ReactElement {
-  return createElement("delete", { path, handler });
+export function Delete<Path extends string = string>({
+  path,
+  handler,
+  children,
+  render,
+}: ExtendedMethodProps<Path>): React.ReactElement {
+  return createElement("delete", { path, handler, render }, children);
 }
 Delete.__serverNodeType = "delete" as const;
 
 /**
  * Handle OPTIONS requests.
  */
-export function Options({ path, handler }: MethodProps): React.ReactElement {
-  return createElement("options", { path, handler });
+export function Options<Path extends string = string>({
+  path,
+  handler,
+  children,
+  render,
+}: ExtendedMethodProps<Path>): React.ReactElement {
+  return createElement("options", { path, handler, render }, children);
 }
 Options.__serverNodeType = "options" as const;
 
 /**
  * Handle HEAD requests.
  */
-export function Head({ path, handler }: MethodProps): React.ReactElement {
-  return createElement("head", { path, handler });
+export function Head<Path extends string = string>({
+  path,
+  handler,
+  children,
+  render,
+}: ExtendedMethodProps<Path>): React.ReactElement {
+  return createElement("head", { path, handler, render }, children);
 }
 Head.__serverNodeType = "head" as const;
 
 /**
  * Handle all HTTP methods.
  */
-export function All({ path, handler }: MethodProps): React.ReactElement {
-  return createElement("all", { path, handler });
+export function All<Path extends string = string>({
+  path,
+  handler,
+  children,
+  render,
+}: ExtendedMethodProps<Path>): React.ReactElement {
+  return createElement("all", { path, handler, render }, children);
 }
 All.__serverNodeType = "all" as const;
 

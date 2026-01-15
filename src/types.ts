@@ -1,7 +1,11 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
+import type { ExtractRouteParams, TypedRouteContext } from "./path-types.js";
 
 // Re-export Express types for convenience
 export type { Request, Response, NextFunction, RequestHandler };
+
+// Re-export path types for convenience
+export type { ExtractRouteParams } from "./path-types.js";
 
 /**
  * HTTP methods supported by the framework
@@ -87,6 +91,28 @@ export interface MethodProps {
   handler?: RouteHandler;
   /** Response components - rendered to JSON on each request */
   children?: React.ReactNode;
+}
+
+/**
+ * Typed props for HTTP method components with path type inference.
+ * The render prop receives typed params based on the path.
+ *
+ * @example
+ * ```tsx
+ * <Get<"/users/:id"> path="/users/:id" render={({ params }) => (
+ *   // params.id is typed as string!
+ *   <UserResponse id={params.id} />
+ * )} />
+ * ```
+ */
+export interface TypedMethodProps<Path extends string = string> {
+  path?: Path;
+  /** Traditional Express-style handler function */
+  handler?: RouteHandler;
+  /** Response components - rendered to JSON on each request */
+  children?: React.ReactNode;
+  /** Typed render prop - receives params with types inferred from path */
+  render?: (context: TypedRouteContext<ExtractRouteParams<Path>>) => React.ReactNode;
 }
 
 /**

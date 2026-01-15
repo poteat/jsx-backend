@@ -343,6 +343,37 @@ function GetPostResponse() {
 }
 
 // ============================================================================
+// Type-Safe Response Components (using typed props)
+// ============================================================================
+
+/**
+ * A response component that receives typed params as props.
+ * This is the most type-safe pattern - params are validated at compile time.
+ */
+function TypedUserResponse({ id }: { id: string }) {
+  const user = db.users.get(id);
+
+  if (!user) {
+    return <NotFoundResponse message={`User ${id} not found`} />;
+  }
+
+  return (
+    <Object>
+      <Field name="id">{user.id}</Field>
+      <Field name="name">{user.name}</Field>
+      <Field name="email">{user.email}</Field>
+      <Field name="role">{user.role}</Field>
+      <Field name="_meta">
+        <Object>
+          <Field name="fetchedAt">{new Date().toISOString()}</Field>
+          <Field name="pattern">typed-render-prop</Field>
+        </Object>
+      </Field>
+    </Object>
+  );
+}
+
+// ============================================================================
 // Middleware (still using traditional handlers for middleware logic)
 // ============================================================================
 
@@ -427,6 +458,23 @@ function App() {
               <GetPostResponse />
             </Get>
           </Route>
+
+          {/*
+           * TYPED RENDER PROP EXAMPLE
+           *
+           * This demonstrates the most type-safe pattern:
+           * The render prop receives `params` with types inferred from the path!
+           *
+           * <Get path="/typed/:id"> means params.id is typed as string
+           * If you try to access params.foo, TypeScript will error!
+           */}
+          <Get<"/typed/:id">
+            path="/typed/:id"
+            render={({ params }) => (
+              // params.id is typed as string - try params.nonexistent to see error!
+              <TypedUserResponse id={params.id} />
+            )}
+          />
         </Api>
 
         {/* 404 fallback - using traditional handler for catch-all */}
@@ -471,6 +519,7 @@ app.listen(PORT, () => {
 ║    GET  /api/v1/users/1/role-info - Pattern matching demo      ║
 ║    GET  /api/v1/posts           - List posts with authors      ║
 ║    GET  /api/v1/posts?published=true - Filter published only   ║
+║    GET  /api/v1/typed/:id       - Typed render prop demo       ║
 ╚════════════════════════════════════════════════════════════════╝
 `);
 });

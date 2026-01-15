@@ -1,5 +1,6 @@
 import React, { ReactNode, ReactElement } from "react";
 import type { Request, Response } from "express";
+import type { ExtractRouteParams } from "./path-types.js";
 
 // ============================================================================
 // Request Context - Allows response components to access request data
@@ -11,6 +12,18 @@ export interface RequestContextValue {
   params: Record<string, string>;
   query: Record<string, string | string[] | undefined>;
   body: unknown;
+}
+
+/**
+ * Typed route context for render props.
+ * Provides type-safe access to route parameters.
+ */
+export interface TypedRouteContext<Params extends Record<string, string> = Record<string, string>> {
+  params: Params;
+  query: Record<string, string | string[] | undefined>;
+  body: unknown;
+  req: Request;
+  res: Response;
 }
 
 /**
@@ -52,9 +65,32 @@ export function useRequest(): RequestContextValue {
 
 /**
  * Get URL params (e.g., /users/:id -> { id: "123" })
+ *
+ * @example
+ * ```typescript
+ * // Basic usage - manually specify the type
+ * const { id } = useParams<{ id: string }>();
+ *
+ * // Path-inferred usage (experimental)
+ * const params = useParamsFromPath<"/users/:id">();
+ * params.id // typed as string
+ * ```
  */
 export function useParams<T extends Record<string, string> = Record<string, string>>(): T {
   return useRequest().params as T;
+}
+
+/**
+ * Get URL params with types inferred from a path literal.
+ *
+ * @example
+ * ```typescript
+ * const { userId, postId } = useParamsFromPath<"/users/:userId/posts/:postId">();
+ * // Both userId and postId are typed as string
+ * ```
+ */
+export function useParamsFromPath<Path extends string>(): ExtractRouteParams<Path> {
+  return useRequest().params as ExtractRouteParams<Path>;
 }
 
 /**

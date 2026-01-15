@@ -261,10 +261,44 @@ function processNode(
       const methodPath = (props.path as string) || "";
       const fullPath = basePath + methodPath || "/";
 
+      // Check if we have a render prop (typed render function)
+      const renderFn = props.render as ((ctx: any) => React.ReactNode) | undefined;
+
       // Check if we have a response element (component-based response)
       const responseElement = props.responseElement as React.ReactElement | undefined;
 
-      if (responseElement) {
+      if (renderFn) {
+        // Typed render prop - call it with context at request time
+        const handler: express.RequestHandler = (req, res) => {
+          try {
+            const context = {
+              params: req.params as Record<string, string>,
+              query: req.query as Record<string, string | string[] | undefined>,
+              body: req.body,
+              req,
+              res,
+            };
+            // Call render function to get the response element
+            const element = renderFn(context);
+            if (React.isValidElement(element)) {
+              const result = renderResponse(element, req, res);
+              sendResponse(result, res);
+            } else if (element != null) {
+              // If it returns a primitive, send it directly
+              res.json(element);
+            } else {
+              res.status(204).end();
+            }
+          } catch (error) {
+            console.error("Error rendering response:", error);
+            res.status(500).json({
+              error: "Internal server error",
+              message: error instanceof Error ? error.message : "Unknown error",
+            });
+          }
+        };
+        router[type](fullPath, handler);
+      } else if (responseElement) {
         // Create a handler that renders the response component
         const handler: express.RequestHandler = (req, res) => {
           try {
