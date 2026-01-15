@@ -149,3 +149,22 @@ export type {
   DefaultProps,
   RequestContextValue,
 } from "./response.js";
+
+// Route helpers for better type inference
+export {
+  // Path helper
+  path,
+  // Function-based route builders
+  get,
+  post,
+  put,
+  patch,
+  del,
+  options,
+  head,
+  all,
+  // Route builder chain
+  route,
+} from "./route-helpers.js";
+
+export type { TypedPath, RouteBuilder } from "./route-helpers.js";

@@ -36,7 +36,12 @@ import {
   useParams,
   useQuery,
   useBody,
+  // Route helpers for better type inference
+  get,
+  post,
+  route,
 } from "./index.js";
+import { z, ZodGet, ZodPost, ZodPut, ZodDelete, getApiSchemas } from "./zod.js";
 import type { RouteHandler } from "./types.js";
 
 // ============================================================================
@@ -387,6 +392,85 @@ const loggerMiddleware: RouteHandler = (req, res, next) => {
 };
 
 // ============================================================================
+// Zod Schemas for Validation
+// ============================================================================
+
+/**
+ * Zod schemas provide runtime validation AND compile-time types.
+ */
+const UserIdParamsSchema = z.object({
+  id: z.string(),
+});
+
+const CreateUserBodySchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  email: z.string().email("Invalid email format"),
+  role: z.enum(["admin", "user", "guest"]).optional().default("user"),
+});
+
+const UpdateUserBodySchema = z.object({
+  name: z.string().optional(),
+  email: z.string().email().optional(),
+  role: z.enum(["admin", "user", "guest"]).optional(),
+});
+
+const UserResponseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string(),
+  role: z.enum(["admin", "user", "guest"]),
+  createdAt: z.string(),
+});
+
+// ============================================================================
+// Zod-Validated Response Components
+// ============================================================================
+
+/**
+ * Response component that receives validated params.
+ * Type safety is guaranteed by the Zod schema.
+ */
+function ValidatedUserResponse({ id }: z.infer<typeof UserIdParamsSchema>) {
+  const user = db.users.get(id);
+
+  if (!user) {
+    return <NotFoundResponse message={`User ${id} not found`} />;
+  }
+
+  return (
+    <Object>
+      <Field name="id">{user.id}</Field>
+      <Field name="name">{user.name}</Field>
+      <Field name="email">{user.email}</Field>
+      <Field name="role">{user.role}</Field>
+      <Field name="createdAt">{user.createdAt}</Field>
+      <Field name="_validated">{true}</Field>
+    </Object>
+  );
+}
+
+/**
+ * Create user with validated body.
+ */
+function ValidatedCreateUserResponse({ body }: { body: z.infer<typeof CreateUserBodySchema> }) {
+  const id = String(db.nextUserId++);
+  const user: User = {
+    id,
+    name: body.name,
+    email: body.email,
+    role: body.role,
+    createdAt: new Date().toISOString(),
+  };
+  db.users.set(id, user);
+
+  return (
+    <CreatedResponse location={`/api/v2/users/${id}`}>
+      <UserObject user={user} />
+    </CreatedResponse>
+  );
+}
+
+// ============================================================================
 // Main Application
 // ============================================================================
 
@@ -477,6 +561,102 @@ function App() {
           />
         </Api>
 
+        {/*
+         * API V2 - Using Zod validation and route helpers
+         *
+         * This demonstrates:
+         * 1. Zod schemas for runtime validation
+         * 2. Type inference from schemas
+         * 3. Route helper functions for less verbose code
+         */}
+        <Api path="/api/v2" cors>
+          {/* Zod-validated GET with params schema */}
+          <ZodGet
+            path="/users/:id"
+            params={UserIdParamsSchema}
+            response={UserResponseSchema}
+            render={({ params }) => (
+              // params.id is validated against UserIdParamsSchema
+              <ValidatedUserResponse id={params.id} />
+            )}
+          />
+
+          {/* Zod-validated POST with body schema */}
+          <ZodPost
+            path="/users"
+            body={CreateUserBodySchema}
+            response={UserResponseSchema}
+            render={({ body }) => (
+              // body is validated and typed from CreateUserBodySchema
+              // Invalid requests return 400 with validation errors
+              <ValidatedCreateUserResponse body={body} />
+            )}
+          />
+
+          {/* Zod-validated PUT with params AND body */}
+          <ZodPut
+            path="/users/:id"
+            params={UserIdParamsSchema}
+            body={UpdateUserBodySchema}
+            render={({ params, body }) => {
+              const user = db.users.get(params.id);
+              if (!user) {
+                return <NotFoundResponse message="User not found" />;
+              }
+              const updated = { ...user, ...body };
+              db.users.set(params.id, updated);
+              return <UserObject user={updated} />;
+            }}
+          />
+
+          {/* Zod-validated DELETE */}
+          <ZodDelete
+            path="/users/:id"
+            params={UserIdParamsSchema}
+            render={({ params }) => {
+              if (!db.users.has(params.id)) {
+                return <NotFoundResponse message="User not found" />;
+              }
+              db.users.delete(params.id);
+              return <Status code={204}><Literal value={null} /></Status>;
+            }}
+          />
+
+          {/*
+           * ROUTE HELPER FUNCTIONS
+           *
+           * These helpers infer types from the path string automatically.
+           * No need for explicit type parameters!
+           */}
+
+          {/* Function-style route - types inferred from path */}
+          {get("/inferred/:userId/posts/:postId", ({ params }) => (
+            // params.userId and params.postId are both typed as string!
+            <Object>
+              <Field name="userId">{params.userId}</Field>
+              <Field name="postId">{params.postId}</Field>
+              <Field name="message">Route helper with inferred types</Field>
+            </Object>
+          ))}
+
+          {/* Route builder chain pattern */}
+          {route("/items/:id")
+            .get(({ params }) => (
+              <Object>
+                <Field name="action">get</Field>
+                <Field name="id">{params.id}</Field>
+              </Object>
+            ))
+            .delete(({ params }) => (
+              <Object>
+                <Field name="action">delete</Field>
+                <Field name="id">{params.id}</Field>
+                <Field name="deleted">{true}</Field>
+              </Object>
+            ))
+            .build()}
+        </Api>
+
         {/* 404 fallback - using traditional handler for catch-all */}
         <Get
           path="*"
@@ -501,25 +681,36 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
 app.listen(PORT, () => {
   console.log(`
-╔════════════════════════════════════════════════════════════════╗
-║              JSX Backend Server (Component Responses)           ║
-╠════════════════════════════════════════════════════════════════╣
-║  Server running at: http://localhost:${PORT.toString().padEnd(27)}║
-║                                                                ║
-║  Routes AND responses are now React components!                ║
-║                                                                ║
-║  Try these endpoints:                                          ║
-║    GET  /                       - Welcome (component response) ║
-║    GET  /health                 - Health check                 ║
-║    GET  /api/v1/users           - List users (paginated)       ║
-║    GET  /api/v1/users?page=1    - With pagination              ║
-║    GET  /api/v1/users/1         - Get user by ID               ║
-║    POST /api/v1/users           - Create user                  ║
-║    PUT  /api/v1/users/1         - Update user                  ║
-║    GET  /api/v1/users/1/role-info - Pattern matching demo      ║
-║    GET  /api/v1/posts           - List posts with authors      ║
-║    GET  /api/v1/posts?published=true - Filter published only   ║
-║    GET  /api/v1/typed/:id       - Typed render prop demo       ║
-╚════════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════════════╗
+║               JSX Backend Server (Component Responses)                ║
+╠══════════════════════════════════════════════════════════════════════╣
+║  Server running at: http://localhost:${PORT.toString().padEnd(31)}║
+║                                                                      ║
+║  Routes AND responses are now React components!                      ║
+║                                                                      ║
+║  API v1 - Component-based responses:                                 ║
+║    GET  /api/v1/users           - List users (paginated)             ║
+║    GET  /api/v1/users/:id       - Get user by ID                     ║
+║    POST /api/v1/users           - Create user                        ║
+║    GET  /api/v1/typed/:id       - Typed render prop demo             ║
+║                                                                      ║
+║  API v2 - Zod validation + route helpers:                            ║
+║    GET  /api/v2/users/:id       - Zod-validated params               ║
+║    POST /api/v2/users           - Zod-validated body                 ║
+║    PUT  /api/v2/users/:id       - Params + body validation           ║
+║    GET  /api/v2/inferred/:userId/posts/:postId - Route helpers       ║
+║    GET  /api/v2/items/:id       - Route builder pattern              ║
+║                                                                      ║
+║  Other:                                                              ║
+║    GET  /                       - Welcome                            ║
+║    GET  /health                 - Health check                       ║
+╚══════════════════════════════════════════════════════════════════════╝
 `);
+
+  // Demo: Print collected API schemas (useful for client generation)
+  const schemas = getApiSchemas();
+  console.log(`\nRegistered ${schemas.size} API schemas for client generation:`);
+  for (const [key] of schemas) {
+    console.log(`  - ${key}`);
+  }
 });
