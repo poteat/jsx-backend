@@ -168,3 +168,31 @@ export {
 } from "./route-helpers.js";
 
 export type { TypedPath, RouteBuilder } from "./route-helpers.js";
+
+// Unified input endpoints (Zod + query/body merged into single "input")
+export {
+  // Input schema builder
+  input,
+  InputSchemaBuilder,
+  // Endpoint components
+  Endpoint,
+  GET,
+  POST,
+  PUT,
+  PATCH,
+  DELETE,
+  // Schema registry
+  getEndpointSchemas,
+  clearEndpointSchemas,
+  // Client generation
+  generateApiClient,
+  // Re-export zod
+  z,
+} from "./endpoint.js";
+
+export type {
+  InputSchema,
+  EndpointContext,
+  EndpointSchema,
+  EndpointProps,
+} from "./endpoint.js";

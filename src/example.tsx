@@ -42,6 +42,15 @@ import {
   route,
 } from "./index.js";
 import { z, ZodGet, ZodPost, ZodPut, ZodDelete, getApiSchemas } from "./zod.js";
+import {
+  input,
+  GET,
+  POST,
+  PUT,
+  DELETE as DEL,
+  getEndpointSchemas,
+  generateApiClient,
+} from "./endpoint.js";
 import type { RouteHandler } from "./types.js";
 
 // ============================================================================
@@ -471,6 +480,51 @@ function ValidatedCreateUserResponse({ body }: { body: z.infer<typeof CreateUser
 }
 
 // ============================================================================
+// Unified Input Schemas (for API v3)
+// ============================================================================
+
+/**
+ * Unified input schemas merge query and body into a single "input" object.
+ * The server and client both just deal with one input - the library handles
+ * splitting it into query params vs body based on the schema definition.
+ */
+
+// For GET /users - all fields go in query string
+const ListUsersInput = input({
+  page: z.coerce.number().optional().default(1),
+  limit: z.coerce.number().optional().default(10),
+  search: z.string().optional(),
+});
+
+// For POST /users - all fields go in body
+const CreateUserInput = input({
+  name: z.string().min(1),
+  email: z.string().email(),
+  role: z.enum(["admin", "user", "guest"]).optional().default("user"),
+});
+
+// For PUT /users/:id - all fields go in body
+const UpdateUserInput = input({
+  name: z.string().optional(),
+  email: z.string().email().optional(),
+  role: z.enum(["admin", "user", "guest"]).optional(),
+});
+
+// For GET /users/:id - with optional query param
+const GetUserInput = input({
+  include: z.string().optional(), // e.g., "posts" to include user's posts
+});
+
+// Output schema for documentation/validation
+const UserOutput = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string(),
+  role: z.enum(["admin", "user", "guest"]),
+  createdAt: z.string(),
+});
+
+// ============================================================================
 // Main Application
 // ============================================================================
 
@@ -657,6 +711,162 @@ function App() {
             .build()}
         </Api>
 
+        {/*
+         * API V3 - Unified Input Pattern
+         *
+         * This is the cleanest API - query and body are merged into a single "input".
+         * - Server: render receives { params, input }
+         * - Client: api.getUsers({ page: 1, search: "foo" }) - one object
+         * - The library handles splitting into query vs body automatically
+         */}
+        <Api path="/api/v3" cors>
+          {/* GET /users - input becomes query params automatically */}
+          <GET
+            path="/users"
+            input={ListUsersInput}
+            output={z.array(UserOutput)}
+            render={({ input }) => {
+              // input.page, input.limit, input.search are all typed!
+              let users = globalThis.Array.from(db.users.values());
+
+              if (input.search) {
+                const search = input.search.toLowerCase();
+                users = users.filter(
+                  (u) =>
+                    u.name.toLowerCase().includes(search) ||
+                    u.email.toLowerCase().includes(search)
+                );
+              }
+
+              const start = (input.page - 1) * input.limit;
+              const paginated = users.slice(start, start + input.limit);
+
+              return (
+                <Object>
+                  <Field name="data">
+                    <Array>
+                      {paginated.map((user) => (
+                        <UserObject key={user.id} user={user} />
+                      ))}
+                    </Array>
+                  </Field>
+                  <Field name="pagination">
+                    <Object>
+                      <Field name="page">{input.page}</Field>
+                      <Field name="limit">{input.limit}</Field>
+                      <Field name="total">{users.length}</Field>
+                    </Object>
+                  </Field>
+                </Object>
+              );
+            }}
+          />
+
+          {/* GET /users/:id - params + optional input */}
+          <GET
+            path="/users/:id"
+            params={z.object({ id: z.string() })}
+            input={GetUserInput}
+            output={UserOutput}
+            render={({ params, input }) => {
+              const user = db.users.get(params.id);
+              if (!user) {
+                return <NotFoundResponse message="User not found" />;
+              }
+
+              // If include=posts, fetch user's posts too
+              if (input.include === "posts") {
+                const posts = globalThis.Array.from(db.posts.values()).filter(
+                  (p) => p.userId === user.id
+                );
+                return (
+                  <Object>
+                    <Field name="id">{user.id}</Field>
+                    <Field name="name">{user.name}</Field>
+                    <Field name="email">{user.email}</Field>
+                    <Field name="role">{user.role}</Field>
+                    <Field name="posts">
+                      <Array>
+                        {posts.map((post) => (
+                          <PostObject key={post.id} post={post} />
+                        ))}
+                      </Array>
+                    </Field>
+                  </Object>
+                );
+              }
+
+              return <UserObject user={user} />;
+            }}
+          />
+
+          {/* POST /users - input becomes request body */}
+          <POST
+            path="/users"
+            input={CreateUserInput}
+            output={UserOutput}
+            render={({ input }) => {
+              // input is fully validated - name, email required, role has default
+              const id = String(db.nextUserId++);
+              const user: User = {
+                id,
+                name: input.name,
+                email: input.email,
+                role: input.role,
+                createdAt: new Date().toISOString(),
+              };
+              db.users.set(id, user);
+
+              return (
+                <CreatedResponse location={`/api/v3/users/${id}`}>
+                  <UserObject user={user} />
+                </CreatedResponse>
+              );
+            }}
+          />
+
+          {/* PUT /users/:id - params + body input */}
+          <PUT
+            path="/users/:id"
+            params={z.object({ id: z.string() })}
+            input={UpdateUserInput}
+            output={UserOutput}
+            render={({ params, input }) => {
+              const user = db.users.get(params.id);
+              if (!user) {
+                return <NotFoundResponse message="User not found" />;
+              }
+
+              const updated: User = {
+                ...user,
+                ...(input.name && { name: input.name }),
+                ...(input.email && { email: input.email }),
+                ...(input.role && { role: input.role }),
+              };
+              db.users.set(params.id, updated);
+
+              return <UserObject user={updated} />;
+            }}
+          />
+
+          {/* DELETE /users/:id */}
+          <DEL
+            path="/users/:id"
+            params={z.object({ id: z.string() })}
+            render={({ params }) => {
+              if (!db.users.has(params.id)) {
+                return <NotFoundResponse message="User not found" />;
+              }
+              db.users.delete(params.id);
+              return (
+                <Status code={204}>
+                  <Literal value={null} />
+                </Status>
+              );
+            }}
+          />
+        </Api>
+
         {/* 404 fallback - using traditional handler for catch-all */}
         <Get
           path="*"
@@ -686,31 +896,37 @@ app.listen(PORT, () => {
 ╠══════════════════════════════════════════════════════════════════════╣
 ║  Server running at: http://localhost:${PORT.toString().padEnd(31)}║
 ║                                                                      ║
-║  Routes AND responses are now React components!                      ║
-║                                                                      ║
-║  API v1 - Component-based responses:                                 ║
+║  API v1 - Component-based responses (hooks for context):             ║
 ║    GET  /api/v1/users           - List users (paginated)             ║
-║    GET  /api/v1/users/:id       - Get user by ID                     ║
 ║    POST /api/v1/users           - Create user                        ║
-║    GET  /api/v1/typed/:id       - Typed render prop demo             ║
+║    GET  /api/v1/users/:id       - Get user by ID                     ║
 ║                                                                      ║
-║  API v2 - Zod validation + route helpers:                            ║
+║  API v2 - Zod validation (separate query/body schemas):              ║
 ║    GET  /api/v2/users/:id       - Zod-validated params               ║
 ║    POST /api/v2/users           - Zod-validated body                 ║
 ║    PUT  /api/v2/users/:id       - Params + body validation           ║
-║    GET  /api/v2/inferred/:userId/posts/:postId - Route helpers       ║
-║    GET  /api/v2/items/:id       - Route builder pattern              ║
 ║                                                                      ║
-║  Other:                                                              ║
-║    GET  /                       - Welcome                            ║
-║    GET  /health                 - Health check                       ║
+║  API v3 - Unified input (query + body merged):                       ║
+║    GET  /api/v3/users           - ?page=1&limit=10&search=foo        ║
+║    GET  /api/v3/users/:id       - ?include=posts                     ║
+║    POST /api/v3/users           - { name, email, role }              ║
+║    PUT  /api/v3/users/:id       - { name?, email?, role? }           ║
+║    DELETE /api/v3/users/:id     - Delete user                        ║
+║                                                                      ║
+║  Other: GET / (welcome), GET /health                                 ║
 ╚══════════════════════════════════════════════════════════════════════╝
 `);
 
-  // Demo: Print collected API schemas (useful for client generation)
-  const schemas = getApiSchemas();
-  console.log(`\nRegistered ${schemas.size} API schemas for client generation:`);
-  for (const [key] of schemas) {
-    console.log(`  - ${key}`);
+  // Demo: Print collected endpoint schemas (for client generation)
+  const endpoints = getEndpointSchemas();
+  console.log(`\nRegistered ${endpoints.size} endpoints for client generation:`);
+  for (const [key, schema] of endpoints) {
+    const hasInput = schema.input ? " (has input)" : "";
+    console.log(`  - ${key}${hasInput}`);
   }
+
+  // Demo: Generate client code
+  console.log("\n--- Generated API Client (preview) ---");
+  const clientCode = generateApiClient({ baseUrl: `http://localhost:${PORT}` });
+  console.log(clientCode.slice(0, 800) + "\n...(truncated)");
 });
