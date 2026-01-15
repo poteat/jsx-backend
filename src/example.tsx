@@ -1,30 +1,43 @@
 /**
- * Example: A complete REST API using JSX Backend
+ * Example: Component-Based REST API using JSX Backend
  *
- * This demonstrates how React/JSX semantics can be used to define
- * an HTTP server in a declarative, component-based way.
+ * This demonstrates how both routes AND responses can be defined
+ * as React component trees. Responses "render" to JSON.
  *
  * Run with: npm start
  */
 
 import React from "react";
 import {
+  // Server/routing components
   render,
   Server,
-  Router,
   Route,
   Get,
   Post,
   Put,
   Delete,
   Middleware,
-  Resource,
   Api,
-  HealthCheck,
-  NotFound,
-  ErrorBoundary,
+  // Response components
+  Object,
+  Array,
+  Field,
+  Literal,
+  Status,
+  When,
+  Match,
+  Case,
+  Default,
+  ErrorResponse,
+  NotFoundResponse,
+  CreatedResponse,
+  // Hooks
+  useParams,
+  useQuery,
+  useBody,
 } from "./index.js";
-import type { Request, Response, NextFunction, RouteHandler } from "./types.js";
+import type { RouteHandler } from "./types.js";
 
 // ============================================================================
 // Simulated Database
@@ -34,6 +47,7 @@ interface User {
   id: string;
   name: string;
   email: string;
+  role: "admin" | "user" | "guest";
   createdAt: string;
 }
 
@@ -42,28 +56,296 @@ interface Post {
   userId: string;
   title: string;
   content: string;
+  published: boolean;
   createdAt: string;
 }
 
 const db = {
   users: new Map<string, User>([
-    ["1", { id: "1", name: "Alice", email: "alice@example.com", createdAt: new Date().toISOString() }],
-    ["2", { id: "2", name: "Bob", email: "bob@example.com", createdAt: new Date().toISOString() }],
+    ["1", { id: "1", name: "Alice", email: "alice@example.com", role: "admin", createdAt: new Date().toISOString() }],
+    ["2", { id: "2", name: "Bob", email: "bob@example.com", role: "user", createdAt: new Date().toISOString() }],
+    ["3", { id: "3", name: "Charlie", email: "charlie@example.com", role: "guest", createdAt: new Date().toISOString() }],
   ]),
   posts: new Map<string, Post>([
-    ["1", { id: "1", userId: "1", title: "Hello World", content: "My first post!", createdAt: new Date().toISOString() }],
+    ["1", { id: "1", userId: "1", title: "Hello World", content: "My first post!", published: true, createdAt: new Date().toISOString() }],
+    ["2", { id: "2", userId: "1", title: "Draft Post", content: "Work in progress...", published: false, createdAt: new Date().toISOString() }],
   ]),
-  nextUserId: 3,
-  nextPostId: 2,
+  nextUserId: 4,
+  nextPostId: 3,
 };
 
 // ============================================================================
-// Middleware
+// Response Components - Reusable "templates" for JSON responses
 // ============================================================================
 
 /**
- * Request logging middleware
+ * A single user rendered as a JSON object.
+ * This is a reusable component that can be used anywhere.
  */
+function UserObject({ user }: { user: User }) {
+  return (
+    <Object>
+      <Field name="id">{user.id}</Field>
+      <Field name="name">{user.name}</Field>
+      <Field name="email">{user.email}</Field>
+      <Field name="role">{user.role}</Field>
+      <Field name="createdAt">{user.createdAt}</Field>
+    </Object>
+  );
+}
+
+/**
+ * User summary - a lighter version with fewer fields
+ */
+function UserSummary({ user }: { user: User }) {
+  return (
+    <Object>
+      <Field name="id">{user.id}</Field>
+      <Field name="name">{user.name}</Field>
+    </Object>
+  );
+}
+
+/**
+ * A post rendered as JSON, with optional author embedding
+ */
+function PostObject({ post, includeAuthor = false }: { post: Post; includeAuthor?: boolean }) {
+  const author = db.users.get(post.userId);
+
+  return (
+    <Object>
+      <Field name="id">{post.id}</Field>
+      <Field name="title">{post.title}</Field>
+      <Field name="content">{post.content}</Field>
+      <Field name="published">{post.published}</Field>
+      <Field name="createdAt">{post.createdAt}</Field>
+      <When condition={includeAuthor && author !== undefined}>
+        <Field name="author">
+          <UserSummary user={author!} />
+        </Field>
+      </When>
+    </Object>
+  );
+}
+
+/**
+ * Paginated list wrapper
+ */
+function PaginatedList<T>({
+  items,
+  page,
+  pageSize,
+  renderItem,
+}: {
+  items: T[];
+  page: number;
+  pageSize: number;
+  renderItem: (item: T) => React.ReactElement;
+}) {
+  const start = (page - 1) * pageSize;
+  const paginatedItems = items.slice(start, start + pageSize);
+  const totalPages = Math.ceil(items.length / pageSize);
+
+  return (
+    <Object>
+      <Field name="data">
+        <Array>
+          {paginatedItems.map(renderItem)}
+        </Array>
+      </Field>
+      <Field name="pagination">
+        <Object>
+          <Field name="page">{page}</Field>
+          <Field name="pageSize">{pageSize}</Field>
+          <Field name="total">{items.length}</Field>
+          <Field name="totalPages">{totalPages}</Field>
+        </Object>
+      </Field>
+    </Object>
+  );
+}
+
+// ============================================================================
+// Route Response Components - These access request context via hooks
+// ============================================================================
+
+/**
+ * GET /users - List all users with pagination
+ */
+function ListUsersResponse() {
+  const query = useQuery<{ page?: string; limit?: string }>();
+  const page = parseInt(query.page || "1");
+  const limit = parseInt(query.limit || "10");
+
+  const users = globalThis.Array.from(db.users.values());
+
+  return (
+    <PaginatedList
+      items={users}
+      page={page}
+      pageSize={limit}
+      renderItem={(user) => <UserObject key={user.id} user={user} />}
+    />
+  );
+}
+
+/**
+ * GET /users/:id - Get a single user
+ */
+function GetUserResponse() {
+  const { id } = useParams<{ id: string }>();
+  const user = db.users.get(id);
+
+  return (
+    <When condition={user !== undefined} fallback={<NotFoundResponse message="User not found" />}>
+      <UserObject user={user!} />
+    </When>
+  );
+}
+
+/**
+ * POST /users - Create a new user
+ */
+function CreateUserResponse() {
+  const body = useBody<{ name?: string; email?: string; role?: User["role"] }>();
+
+  // Validation
+  if (!body.name || !body.email) {
+    return <ErrorResponse message="Name and email are required" code={400} />;
+  }
+
+  // Create user
+  const id = String(db.nextUserId++);
+  const user: User = {
+    id,
+    name: body.name,
+    email: body.email,
+    role: body.role || "user",
+    createdAt: new Date().toISOString(),
+  };
+  db.users.set(id, user);
+
+  return (
+    <CreatedResponse location={`/api/v1/users/${id}`}>
+      <UserObject user={user} />
+    </CreatedResponse>
+  );
+}
+
+/**
+ * PUT /users/:id - Update a user
+ */
+function UpdateUserResponse() {
+  const { id } = useParams<{ id: string }>();
+  const body = useBody<Partial<User>>();
+  const user = db.users.get(id);
+
+  if (!user) {
+    return <NotFoundResponse message="User not found" />;
+  }
+
+  // Update
+  const updated = { ...user, ...body, id: user.id };
+  db.users.set(id, updated);
+
+  return <UserObject user={updated} />;
+}
+
+/**
+ * DELETE /users/:id - Delete a user
+ */
+function DeleteUserResponse() {
+  const { id } = useParams<{ id: string }>();
+
+  if (!db.users.has(id)) {
+    return <NotFoundResponse message="User not found" />;
+  }
+
+  db.users.delete(id);
+  return <Status code={204}><Literal value={null} /></Status>;
+}
+
+/**
+ * GET /users/:id/role-info - Demonstrate pattern matching
+ */
+function UserRoleInfoResponse() {
+  const { id } = useParams<{ id: string }>();
+  const user = db.users.get(id);
+
+  if (!user) {
+    return <NotFoundResponse message="User not found" />;
+  }
+
+  return (
+    <Object>
+      <Field name="user">{user.name}</Field>
+      <Field name="role">{user.role}</Field>
+      <Field name="permissions">
+        <Match value={user.role}>
+          <Case when="admin">
+            <Array>
+              <Literal value="read" />
+              <Literal value="write" />
+              <Literal value="delete" />
+              <Literal value="admin" />
+            </Array>
+          </Case>
+          <Case when="user">
+            <Array>
+              <Literal value="read" />
+              <Literal value="write" />
+            </Array>
+          </Case>
+          <Default>
+            <Array>
+              <Literal value="read" />
+            </Array>
+          </Default>
+        </Match>
+      </Field>
+    </Object>
+  );
+}
+
+/**
+ * GET /posts - List posts with author info
+ */
+function ListPostsResponse() {
+  const query = useQuery<{ published?: string }>();
+  const publishedOnly = query.published === "true";
+
+  let posts = globalThis.Array.from(db.posts.values());
+  if (publishedOnly) {
+    posts = posts.filter(p => p.published);
+  }
+
+  return (
+    <Array>
+      {posts.map(post => (
+        <PostObject key={post.id} post={post} includeAuthor />
+      ))}
+    </Array>
+  );
+}
+
+/**
+ * GET /posts/:id - Get single post
+ */
+function GetPostResponse() {
+  const { id } = useParams<{ id: string }>();
+  const post = db.posts.get(id);
+
+  return (
+    <When condition={post !== undefined} fallback={<NotFoundResponse message="Post not found" />}>
+      <PostObject post={post!} includeAuthor />
+    </When>
+  );
+}
+
+// ============================================================================
+// Middleware (still using traditional handlers for middleware logic)
+// ============================================================================
+
 const loggerMiddleware: RouteHandler = (req, res, next) => {
   const start = Date.now();
   res.on("finish", () => {
@@ -73,266 +355,87 @@ const loggerMiddleware: RouteHandler = (req, res, next) => {
   next();
 };
 
-/**
- * Simple auth middleware (demo purposes)
- */
-const authMiddleware: RouteHandler = (req, res, next) => {
-  const token = req.headers.authorization;
-
-  if (!token) {
-    // For demo, we'll be lenient
-    (req as any).user = null;
-  } else {
-    // Simulate token validation
-    (req as any).user = { id: "1", role: "admin" };
-  }
-
-  next();
-};
-
-/**
- * Require authentication middleware
- */
-const requireAuth: RouteHandler = (req, res, next) => {
-  if (!(req as any).user) {
-    res.status(401).json({ error: "Authentication required" });
-    return;
-  }
-  next();
-};
-
-// ============================================================================
-// Route Handlers
-// ============================================================================
-
-// Users handlers
-const listUsers: RouteHandler = (req, res) => {
-  res.json(Array.from(db.users.values()));
-};
-
-const getUser: RouteHandler = (req, res) => {
-  const user = db.users.get(req.params.id);
-  if (!user) {
-    res.status(404).json({ error: "User not found" });
-    return;
-  }
-  res.json(user);
-};
-
-const createUser: RouteHandler = (req, res) => {
-  const { name, email } = req.body;
-
-  if (!name || !email) {
-    res.status(400).json({ error: "Name and email are required" });
-    return;
-  }
-
-  const id = String(db.nextUserId++);
-  const user: User = {
-    id,
-    name,
-    email,
-    createdAt: new Date().toISOString(),
-  };
-
-  db.users.set(id, user);
-  res.status(201).json(user);
-};
-
-const updateUser: RouteHandler = (req, res) => {
-  const user = db.users.get(req.params.id);
-  if (!user) {
-    res.status(404).json({ error: "User not found" });
-    return;
-  }
-
-  const updated = { ...user, ...req.body, id: user.id };
-  db.users.set(user.id, updated);
-  res.json(updated);
-};
-
-const deleteUser: RouteHandler = (req, res) => {
-  if (!db.users.has(req.params.id)) {
-    res.status(404).json({ error: "User not found" });
-    return;
-  }
-
-  db.users.delete(req.params.id);
-  res.status(204).end();
-};
-
-// Posts handlers
-const listPosts: RouteHandler = (req, res) => {
-  res.json(Array.from(db.posts.values()));
-};
-
-const getPost: RouteHandler = (req, res) => {
-  const post = db.posts.get(req.params.id);
-  if (!post) {
-    res.status(404).json({ error: "Post not found" });
-    return;
-  }
-  res.json(post);
-};
-
-const createPost: RouteHandler = (req, res) => {
-  const { userId, title, content } = req.body;
-
-  if (!userId || !title) {
-    res.status(400).json({ error: "userId and title are required" });
-    return;
-  }
-
-  const id = String(db.nextPostId++);
-  const post: Post = {
-    id,
-    userId,
-    title,
-    content: content || "",
-    createdAt: new Date().toISOString(),
-  };
-
-  db.posts.set(id, post);
-  res.status(201).json(post);
-};
-
-// User's posts (nested resource)
-const getUserPosts: RouteHandler = (req, res) => {
-  const posts = Array.from(db.posts.values()).filter(
-    (p) => p.userId === req.params.userId
-  );
-  res.json(posts);
-};
-
-// ============================================================================
-// Component-Based Route Organization
-// ============================================================================
-
-/**
- * Demonstrates composing routes as reusable components
- */
-function UserRoutes(): React.ReactElement {
-  return (
-    <Resource
-      path="/users"
-      list={listUsers}
-      get={getUser}
-      create={createUser}
-      update={updateUser}
-      remove={deleteUser}
-    >
-      {/* Nested route: /api/v1/users/:userId/posts */}
-      <Route path="/:userId/posts">
-        <Get handler={getUserPosts} />
-      </Route>
-    </Resource>
-  );
-}
-
-/**
- * Posts routes as a component
- */
-function PostRoutes(): React.ReactElement {
-  return (
-    <Route path="/posts">
-      <Get handler={listPosts} />
-      <Post handler={createPost} />
-      <Route path="/:id">
-        <Get handler={getPost} />
-      </Route>
-    </Route>
-  );
-}
-
-/**
- * Admin routes - protected by auth
- */
-function AdminRoutes(): React.ReactElement {
-  return (
-    <Router path="/admin">
-      <Middleware handler={requireAuth}>
-        <Get
-          path="/stats"
-          handler={(req, res) => {
-            res.json({
-              userCount: db.users.size,
-              postCount: db.posts.size,
-            });
-          }}
-        />
-        <Get
-          path="/users"
-          handler={(req, res) => {
-            res.json({
-              users: Array.from(db.users.values()),
-              total: db.users.size,
-            });
-          }}
-        />
-      </Middleware>
-    </Router>
-  );
-}
-
 // ============================================================================
 // Main Application
 // ============================================================================
 
 /**
- * The main application component
- *
- * Notice how this feels like building a React component tree,
- * but it's actually defining an HTTP API!
+ * The main application - notice how routes have component children
+ * instead of handler functions!
  */
-function App(): React.ReactElement {
+function App() {
   return (
-    <Server port={3000}>
-      {/* Global middleware */}
+    <Server>
       <Middleware handler={loggerMiddleware}>
-        <Middleware handler={authMiddleware}>
-          {/* Root endpoint */}
-          <Get
-            path="/"
-            handler={(req, res) => {
-              res.json({
-                message: "Welcome to JSX Backend!",
-                docs: "/api/v1",
-                health: "/health",
-              });
-            }}
-          />
+        {/* Root welcome - using component response */}
+        <Get path="/">
+          <Object>
+            <Field name="message">Welcome to JSX Backend v2!</Field>
+            <Field name="description">Routes AND responses are components</Field>
+            <Field name="endpoints">
+              <Object>
+                <Field name="users">/api/v1/users</Field>
+                <Field name="posts">/api/v1/posts</Field>
+              </Object>
+            </Field>
+          </Object>
+        </Get>
 
-          {/* Health check */}
-          <HealthCheck
-            path="/health"
-            checks={{
-              database: () => true, // Simulated check
-              memory: () => process.memoryUsage().heapUsed < 500 * 1024 * 1024,
-            }}
-          />
+        {/* Health check - inline response component */}
+        <Get path="/health">
+          <Object>
+            <Field name="status">healthy</Field>
+            <Field name="timestamp">{new Date().toISOString()}</Field>
+            <Field name="uptime">{process.uptime()}</Field>
+          </Object>
+        </Get>
 
-          {/* API v1 with CORS */}
-          <Api path="/api/v1" cors>
-            <ErrorBoundary
-              fallback={(err, req, res) => {
-                console.error("API Error:", err);
-                res.status(500).json({
-                  error: "Internal server error",
-                  message: err.message,
-                });
-              }}
-            >
-              <UserRoutes />
-              <PostRoutes />
-            </ErrorBoundary>
-          </Api>
+        {/* API routes using response components */}
+        <Api path="/api/v1" cors>
+          {/* Users CRUD */}
+          <Route path="/users">
+            <Get>
+              <ListUsersResponse />
+            </Get>
+            <Post>
+              <CreateUserResponse />
+            </Post>
 
-          {/* Admin routes */}
-          <AdminRoutes />
+            <Route path="/:id">
+              <Get>
+                <GetUserResponse />
+              </Get>
+              <Put>
+                <UpdateUserResponse />
+              </Put>
+              <Delete>
+                <DeleteUserResponse />
+              </Delete>
 
-          {/* 404 handler (must be last) */}
-          <NotFound message="Endpoint not found" />
-        </Middleware>
+              <Get path="/role-info">
+                <UserRoleInfoResponse />
+              </Get>
+            </Route>
+          </Route>
+
+          {/* Posts */}
+          <Route path="/posts">
+            <Get>
+              <ListPostsResponse />
+            </Get>
+            <Get path="/:id">
+              <GetPostResponse />
+            </Get>
+          </Route>
+        </Api>
+
+        {/* 404 fallback - using traditional handler for catch-all */}
+        <Get
+          path="*"
+          handler={(req, res) => {
+            res.status(404).json({ error: "Not found", path: req.path });
+          }}
+        />
       </Middleware>
     </Server>
   );
@@ -342,30 +445,32 @@ function App(): React.ReactElement {
 // Bootstrap
 // ============================================================================
 
-console.log("Starting JSX Backend server...\n");
+console.log("Starting JSX Backend server (v2 - Component Responses)...\n");
 
-// Render the JSX tree into an Express app
 const { app } = render(<App />);
 
-// Start listening
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
 app.listen(PORT, () => {
   console.log(`
-╔════════════════════════════════════════════════════════════╗
-║                    JSX Backend Server                       ║
-╠════════════════════════════════════════════════════════════╣
-║  Server running at: http://localhost:${PORT.toString().padEnd(23)}║
-║                                                            ║
-║  Try these endpoints:                                      ║
-║    GET  /                    - Welcome message             ║
-║    GET  /health              - Health check                ║
-║    GET  /api/v1/users        - List all users              ║
-║    GET  /api/v1/users/1      - Get user by ID              ║
-║    POST /api/v1/users        - Create a user               ║
-║    GET  /api/v1/users/1/posts - Get user's posts           ║
-║    GET  /api/v1/posts        - List all posts              ║
-║    GET  /admin/stats         - Admin stats (needs auth)    ║
-╚════════════════════════════════════════════════════════════╝
+╔════════════════════════════════════════════════════════════════╗
+║              JSX Backend Server (Component Responses)           ║
+╠════════════════════════════════════════════════════════════════╣
+║  Server running at: http://localhost:${PORT.toString().padEnd(27)}║
+║                                                                ║
+║  Routes AND responses are now React components!                ║
+║                                                                ║
+║  Try these endpoints:                                          ║
+║    GET  /                       - Welcome (component response) ║
+║    GET  /health                 - Health check                 ║
+║    GET  /api/v1/users           - List users (paginated)       ║
+║    GET  /api/v1/users?page=1    - With pagination              ║
+║    GET  /api/v1/users/1         - Get user by ID               ║
+║    POST /api/v1/users           - Create user                  ║
+║    PUT  /api/v1/users/1         - Update user                  ║
+║    GET  /api/v1/users/1/role-info - Pattern matching demo      ║
+║    GET  /api/v1/posts           - List posts with authors      ║
+║    GET  /api/v1/posts?published=true - Filter published only   ║
+╚════════════════════════════════════════════════════════════════╝
 `);
 });

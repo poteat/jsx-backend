@@ -2,19 +2,30 @@
  * JSX Backend - Express-like HTTP server using React/JSX semantics
  *
  * This library lets you define HTTP APIs using React component patterns.
- * JSX trees are "rendered" into Express apps.
+ * JSX trees are "rendered" into Express apps, and response bodies can
+ * also be defined as component trees that render to JSON.
  *
  * @example
  * ```tsx
- * import { render, Server, Get, Post, Route, Middleware } from "jsx-backend";
+ * import { render, Server, Get, Object, Field, useParams } from "jsx-backend";
+ *
+ * function UserResponse() {
+ *   const { id } = useParams();
+ *   const user = getUser(id);
+ *
+ *   return (
+ *     <Object>
+ *       <Field name="id">{user.id}</Field>
+ *       <Field name="name">{user.name}</Field>
+ *     </Object>
+ *   );
+ * }
  *
  * const App = () => (
  *   <Server>
- *     <Get path="/" handler={(req, res) => res.send("Hello, World!")} />
- *     <Route path="/api">
- *       <Get path="/users" handler={listUsers} />
- *       <Post path="/users" handler={createUser} />
- *     </Route>
+ *     <Get path="/users/:id">
+ *       <UserResponse />
+ *     </Get>
  *   </Server>
  * );
  *
@@ -26,7 +37,10 @@
 // Core render function
 export { render, printTree } from "./reconciler.js";
 
-// Components
+// Response rendering (for advanced use cases)
+export { renderResponse, sendResponse, createHandler } from "./render-response.js";
+
+// Route Components
 export {
   // Core
   Server,
@@ -50,6 +64,40 @@ export {
   HealthCheck,
   NotFound,
 } from "./components.js";
+
+// Response Components
+export {
+  // JSON structure
+  Object,
+  Array,
+  Field,
+  Literal,
+  // HTTP response modifiers
+  Status,
+  Header,
+  Redirect,
+  Empty,
+  // Utility responses
+  ErrorResponse,
+  NotFoundResponse,
+  CreatedResponse,
+  // Conditional rendering
+  When,
+  Match,
+  Case,
+  Default,
+} from "./response.js";
+
+// Request context hooks
+export {
+  useRequest,
+  useParams,
+  useQuery,
+  useBody,
+  useHeaders,
+  useHeader,
+  setRequestContext,
+} from "./response.js";
 
 // Types
 export type {
@@ -75,3 +123,20 @@ export type {
 
 // Re-export component prop types
 export type { ResourceProps, ApiProps, CorsOptions, HealthCheckProps, NotFoundProps } from "./components.js";
+export type {
+  ObjectProps,
+  ArrayProps,
+  FieldProps,
+  LiteralProps,
+  StatusProps,
+  HeaderProps,
+  RedirectProps,
+  ErrorResponseProps,
+  NotFoundResponseProps,
+  CreatedResponseProps,
+  WhenProps,
+  MatchProps,
+  CaseProps,
+  DefaultProps,
+  RequestContextValue,
+} from "./response.js";

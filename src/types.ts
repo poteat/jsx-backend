@@ -78,11 +78,15 @@ export interface RouteProps {
 }
 
 /**
- * Base props for HTTP method components
+ * Base props for HTTP method components.
+ * Can use either a handler function OR children (response components).
  */
 export interface MethodProps {
   path?: string;
-  handler: RouteHandler;
+  /** Traditional Express-style handler function */
+  handler?: RouteHandler;
+  /** Response components - rendered to JSON on each request */
+  children?: React.ReactNode;
 }
 
 /**

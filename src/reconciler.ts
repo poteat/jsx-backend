@@ -1,6 +1,14 @@
 import React from "react";
 import express, { Express, Router, Request, Response, NextFunction } from "express";
 import type { ServerNode, ServerNodeType, HttpMethod } from "./types.js";
+import { renderResponse, sendResponse } from "./render-response.js";
+
+/**
+ * HTTP method node types
+ */
+const HTTP_METHOD_TYPES = new Set<ServerNodeType>([
+  "get", "post", "put", "patch", "delete", "options", "head", "all"
+]);
 
 /**
  * Create a new server node for the tree
@@ -33,6 +41,24 @@ function getServerNodeType(element: React.ReactElement): ServerNodeType | null {
   }
 
   return null;
+}
+
+/**
+ * Check if a React element is a response component (not a server/route component)
+ */
+function isResponseElement(element: React.ReactNode): boolean {
+  if (!React.isValidElement(element)) {
+    return false;
+  }
+
+  // If it has a __serverNodeType, it's a server component, not a response
+  const nodeType = getServerNodeType(element);
+  if (nodeType) {
+    return false;
+  }
+
+  // Otherwise it's a response component (or regular React component for responses)
+  return true;
 }
 
 /**
@@ -77,8 +103,22 @@ function traverseElement(
 
     const node = createNode(nodeType, props, parent);
 
-    // Recursively process children
-    if (children) {
+    // For HTTP method nodes, check if children are response elements
+    if (HTTP_METHOD_TYPES.has(nodeType) && children) {
+      // Check if any children are response elements (not server nodes)
+      const childArray = React.Children.toArray(children);
+      const hasResponseChildren = childArray.some(isResponseElement);
+
+      if (hasResponseChildren && !props.handler) {
+        // Store the original React element for response rendering
+        // We wrap it in a fragment to preserve the tree structure
+        node.props.responseElement = React.createElement(React.Fragment, null, children);
+      } else {
+        // Normal server node children - traverse them
+        node.children = traverseElement(children, node);
+      }
+    } else if (children) {
+      // Recursively process children for other node types
       node.children = traverseElement(children, node);
     }
 
@@ -219,10 +259,33 @@ function processNode(
     case "head":
     case "all": {
       const methodPath = (props.path as string) || "";
-      const handler = props.handler as express.RequestHandler;
       const fullPath = basePath + methodPath || "/";
 
-      router[type](fullPath, handler);
+      // Check if we have a response element (component-based response)
+      const responseElement = props.responseElement as React.ReactElement | undefined;
+
+      if (responseElement) {
+        // Create a handler that renders the response component
+        const handler: express.RequestHandler = (req, res) => {
+          try {
+            const result = renderResponse(responseElement, req, res);
+            sendResponse(result, res);
+          } catch (error) {
+            console.error("Error rendering response:", error);
+            res.status(500).json({
+              error: "Internal server error",
+              message: error instanceof Error ? error.message : "Unknown error",
+            });
+          }
+        };
+        router[type](fullPath, handler);
+      } else {
+        // Traditional handler function
+        const handler = props.handler as express.RequestHandler;
+        if (handler) {
+          router[type](fullPath, handler);
+        }
+      }
       break;
     }
   }
@@ -261,9 +324,21 @@ export interface RenderResult {
  *
  * @example
  * ```tsx
+ * // Traditional handler style
  * const { app } = render(
  *   <Server>
  *     <Get path="/" handler={(req, res) => res.send("Hello!")} />
+ *   </Server>
+ * );
+ *
+ * // Component-based response style
+ * const { app } = render(
+ *   <Server>
+ *     <Get path="/">
+ *       <Object>
+ *         <Field name="message">Hello!</Field>
+ *       </Object>
+ *     </Get>
  *   </Server>
  * );
  *
@@ -295,7 +370,8 @@ export function render(element: React.ReactElement): RenderResult {
 export function printTree(nodes: ServerNode[], indent: string = ""): void {
   for (const node of nodes) {
     const path = node.props.path || "";
-    console.log(`${indent}${node.type}${path ? ` (${path})` : ""}`);
+    const hasResponse = node.props.responseElement ? " [response]" : "";
+    console.log(`${indent}${node.type}${path ? ` (${path})` : ""}${hasResponse}`);
     if (node.children.length > 0) {
       printTree(node.children, indent + "  ");
     }
