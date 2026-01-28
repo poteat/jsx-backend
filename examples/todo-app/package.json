@@ -1,0 +1,21 @@
+{
+  "name": "todo-app-example",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tspc",
+    "dev": "tspc --watch",
+    "start": "node dist/index.js",
+    "typecheck": "tspc --noEmit"
+  },
+  "dependencies": {
+    "express-jsx-core": "*",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "strict-jsx": "*",
+    "ts-patch": "^3.3.0",
+    "typescript": "^5.7.0"
+  }
+}

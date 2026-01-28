@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "jsx": "react-jsx",
+    "plugins": [
+      {
+        "name": "strict-jsx",
+        "transform": "strict-jsx",
+        "transformProgram": true
+      }
+    ]
+  },
+  "include": ["src/**/*"]
+}

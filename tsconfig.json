@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/express-jsx-core" },
+    { "path": "./packages/strict-jsx" },
+    { "path": "./examples/hkt-jsx" }
+  ]
+}

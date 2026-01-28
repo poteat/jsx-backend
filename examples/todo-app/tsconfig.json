@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "jsxImportSource": "express-jsx-core",
+    "plugins": [
+      {
+        "name": "strict-jsx",
+        "transform": "strict-jsx",
+        "transformProgram": true
+      }
+    ]
+  },
+  "include": ["src/**/*"]
+}

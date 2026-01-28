@@ -1,0 +1,23 @@
+{
+  "name": "hkt-jsx",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Example: Using strict-jsx with hkt-toolbelt for HKT expressions",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tspc",
+    "dev": "tspc --watch",
+    "typecheck": "tspc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "hkt-toolbelt": "^0.26.0"
+  },
+  "devDependencies": {
+    "ts-patch": "^3.3.0",
+    "strict-jsx": "*",
+    "typescript": "^5.7.0"
+  }
+}
